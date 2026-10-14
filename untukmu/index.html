@@ -1,1 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>I love you &lt;3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: rgb(15, 0, 0);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
 
+    <script>
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        // Configuration
+        const CFG = {
+            width: 1900,
+            height: 1000,
+            bg_color: "rgb(15, 0, 0)",
+            scale: 20,
+            y_offset: -45,
+            n_outline: 160,
+            n_fill: 130,
+            n_floating: 200, // Reduced slightly for browser performance, can be increased if needed
+            outline_gap: 22,
+            fill_gap: 30,
+            frames_per_step: 0.5,
+            fill_delay_offset: 10,
+            center_delay: 40,
+            fade_speed_min: 25,
+            fade_speed_rand: 10,
+            heart_words: ["i love you", "I LOVE YOU", "love you"],
+            center_text: "I Love you",
+            float_words: ["love", "♥", "love you", "❤"],
+            colors: [
+                "rgb(255, 20, 20)",
+                "rgb(220, 20, 60)",
+                "rgb(255, 0, 0)",
+                "rgb(178, 34, 34)",
+                "rgb(255, 60, 60)"
+            ],
+            get center() {
+                return [this.width / 2, this.height / 2];
+            }
+        };
+
+        // Resize canvas to fit window while keeping coordinate system scale or aspect ratio
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            CFG.width = window.innerWidth;
+            CFG.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function heartParametric(t) {
+            const x = 16.0 * Math.sin(t) ** 3;
+            const y = 13.0 * Math.cos(t) - 5.0 * Math.cos(2 * t) - 2.0 * Math.cos(3 * t) - Math.cos(4 * t);
+            return [x, -y];
+        }
+
+        function heartToScreen(hx, hy) {
+            const sx = hx * CFG.scale + CFG.center[0];
+            const sy = hy * CFG.scale + CFG.center[1] + CFG.y_offset;
+            return [sx, sy];
+        }
+
+        function tooClose(sx, sy, placed, gap) {
+            return placed.some(p => Math.hypot(sx - p[0], sy - p[1]) < gap);
+        }
+
+        // Heart Particles
+        class HeartParticle {
+            constructor(x, y, order, kind) {
+                this.x = x;
+                this.y = y;
+                this.order = order;
+                this.kind = kind;
+                this.word = CFG.heart_words[Math.floor(Math.random() * CFG.heart_words.length)];
+                this.color = CFG.colors[Math.floor(Math.random() * CFG.colors.length)];
+                this.alpha = 0;
+                this.flicker = Math.random() * Math.PI * 2;
+                this.fontSize = kind === 'outline' ? 20 : 17;
+                this.delay = 0;
+                this.sizeMult = 0.85 + Math.random() * 0.3;
+            }
+        }
+
+        // Floating Particles
+        class FloatingParticle {
+            constructor() {
+                this.randomize(true);
+            }
+
+            randomize(scatterY = false) {
+                this.x = 50 + Math.random() * (CFG.width - 100);
+                this.y = scatterY ? Math.random() * CFG.height : CFG.height + 20 + Math.random() * 80;
+                this.word = CFG.float_words[Math.floor(Math.random() * CFG.float_words.length)];
+                this.color = CFG.colors[Math.floor(Math.random() * CFG.colors.length)];
+                this.size = Math.floor(10 + Math.random() * 9);
+                this.alpha = 0;
+                this.maxAlpha = 40 + Math.random() * 80;
+                this.vx = -0.3 + Math.random() * 0.6;
+                this.vy = -0.4 - Math.random() * 0.8;
+                this.swaySpeed = 0.01 + Math.random() * 0.03;
+                this.swayAmount = 0.3 + Math.random() * 0.7;
+                this.phase = Math.random() * Math.PI * 2;
+                this.fadingIn = true;
+                this.life = 0;
+                this.maxLife = Math.floor(300 + Math.random() * 400);
+            }
+
+            update(frame) {
+                this.life++;
+                this.x += this.vx + Math.sin(frame * this.swaySpeed + this.phase) * this.swayAmount;
+                this.y += this.vy;
+
+                if (this.fadingIn) {
+                    this.alpha = Math.min(this.maxAlpha, this.alpha + 3);
+                    if (this.alpha >= this.maxAlpha) this.fadingIn = false;
+                }
+
+                if (this.life > this.maxLife - 60) {
+                    this.alpha = Math.max(0, this.alpha - 3);
+                }
+
+                const offScreen = this.y < -50 || this.x < -50 || this.x > CFG.width + 50;
+                if (offScreen || (this.alpha <= 0 && this.life > 60)) {
+                    this.randomize(false);
+                }
+            }
+        }
+
+        // Generate Outline
+        function generateOutline() {
+            const particles = [];
+            const placed = [];
+            const n = CFG.n_outline;
+            const gap = CFG.outline_gap;
+
+            for (let i = 0; i < n; i++) {
+                const t = (i / n) * Math.PI * 2;
+                const [hx, hy] = heartParametric(t);
+                const [sx, sy] = heartToScreen(hx, hy);
+                if (tooClose(sx, sy, placed, gap)) continue;
+                placed.push([sx, sy]);
+                particles.push(new HeartParticle(sx, sy, i, "outline"));
+            }
+            return particles;
+        }
+
+        // Generate Fill
+        function generateFill() {
+            const particles = [];
+            const placed = [];
+            const n = CFG.n_fill;
+            const gap = CFG.fill_gap;
+            const maxAttempts = n * 80;
+
+            for (let i = 0; i < maxAttempts; i++) {
+                if (particles.length >= n) break;
+                const t = Math.random() * Math.PI * 2;
+                const r = Math.random() * 0.86;
+                const [hx, hy] = heartParametric(t);
+                const [sx, sy] = heartToScreen(hx * r, hy * r);
+
+                if (tooClose(sx, sy, placed, gap)) continue;
+                placed.push([sx, sy]);
+                particles.push(new HeartParticle(sx, sy, Math.floor(Math.random() * 50), "fill"));
+            }
+            return particles;
+        }
+
+        const outline = generateOutline();
+        const fill = generateFill();
+        const outlineSpan = outline.length > 0 ? Math.max(...outline.map(p => p.order)) : 0;
+        const fillStart = Math.floor(outlineSpan * CFG.frames_per_step) + CFG.fill_delay_offset;
+        const centerStart = fillStart + CFG.center_delay;
+
+        outline.forEach(p => {
+            p.delay = Math.floor(p.order * CFG.frames_per_step);
+        });
+
+        fill.forEach(p => {
+            p.delay = fillStart + p.order;
+        });
+
+        const heartParticles = [...outline, ...fill];
+        const floating = Array.from({ length: CFG.n_floating }, () => new FloatingParticle());
+
+        let frame = 0;
+
+        function animate() {
+            frame++;
+
+            // Clear background
+            ctx.fillStyle = CFG.bg_color;
+            ctx.fillRect(0, 0, CFG.width, CFG.height);
+
+            // 1. Render Floating Particles
+            floating.forEach(fp => {
+                fp.update(frame);
+                if (fp.alpha > 0) {
+                    ctx.save();
+                    ctx.globalAlpha = fp.alpha / 255;
+                    ctx.font = `${fp.size}px Arial`;
+                    ctx.fillStyle = fp.color;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(fp.word, fp.x, fp.y);
+                    ctx.restore();
+                }
+            });
+
+            // 2. Render Heart Particles & Glow
+            heartParticles.forEach(p => {
+                if (frame > p.delay && p.alpha < 255) {
+                    p.alpha = Math.min(255, p.alpha + CFG.fade_speed_min + Math.floor(Math.random() * CFG.fade_speed_rand));
+                }
+
+                const flicker = p.alpha >= 255 ? 0.75 + 0.25 * Math.sin(frame * 0.04 + p.flicker) : 1.0;
+                const alpha = Math.floor(p.alpha * flicker);
+
+                if (alpha > 0) {
+                    ctx.save();
+                    const currentFontSize = p.fontSize * p.sizeMult;
+                    ctx.font = `bold ${currentFontSize}px Arial`;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+
+                    // Glow Effect
+                    if (alpha > 10) {
+                        ctx.shadowColor = p.color;
+                        ctx.shadowBlur = 12;
+                    }
+
+                    ctx.globalAlpha = alpha / 255;
+                    ctx.fillStyle = p.color;
+                    ctx.fillText(p.word, p.x, p.y);
+                    ctx.restore();
+                }
+            });
+
+            // 3. Render Center Pulsing Text
+            if (frame > centerStart) {
+                const progress = Math.min(1.0, (frame - centerStart) / 30.0);
+                const centerAlpha = Math.floor(255 * (1 - Math.exp(-progress * 8)));
+                const pulse = 1.0 + 0.025 * Math.sin(frame * 0.05);
+
+                if (centerAlpha > 0) {
+                    ctx.save();
+                    const [cx, cy] = CFG.center;
+                    ctx.translate(cx, cy);
+                    ctx.scale(pulse, pulse);
+
+                    const baseFontSize = 54;
+                    ctx.font = `bold ${baseFontSize}px Georgia`;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+
+                    if (centerAlpha > 10) {
+                        ctx.shadowColor = "rgb(255, 200, 200)";
+                        ctx.shadowBlur = 20;
+                    }
+
+                    ctx.globalAlpha = centerAlpha / 255;
+                    ctx.fillStyle = "rgb(255, 200, 200)";
+                    ctx.fillText(CFG.center_text, 0, 0);
+                    ctx.restore();
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>
